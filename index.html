@@ -342,53 +342,44 @@ function gEnd(e){
  if(e.type==='pointerup'&&!g.noDown&&dy>cs*3&&dt<320&&Math.abs(dx)<dy*.5)hard();
 }
 addEventListener('pointerup',gEnd);addEventListener('pointercancel',gEnd);
-/* ---------- world leaderboard (GitHub Gist, no login needed) ---------- */
-const GIST_ID='56a55c3b030b401ca0bb83b49e3b5ee2';
-const GIST_TOKEN='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';
-const GIST_FILE='leaderboard.json';
+/* ---------- world leaderboard (Cloudflare Worker backend) ---------- */
+const LEADERBOARD_API='https://duck-tetris-leaderboard.jamke-duck-taiwan.workers.dev/';
 function myPlayerId(){
  let id=localStorage.getItem('duckTetrisPid');
  if(!id){id=(crypto.randomUUID?crypto.randomUUID():('p'+Date.now()+Math.random().toString(16).slice(2)));try{localStorage.setItem('duckTetrisPid',id)}catch(e){}}
  return id}
 async function readGist(){
- const r=await fetch('https://api.github.com/gists/'+GIST_ID,{headers:{Accept:'application/vnd.github+json'}});
- if(!r.ok)throw new Error('gist read failed');
- const j=await r.json();
- const f=j.files&&j.files[GIST_FILE];
- if(!f)throw new Error('missing file');
- let content=f.content;
- if(f.truncated)content=await (await fetch(f.raw_url)).text();
- try{const a=JSON.parse(content);return Array.isArray(a)?a:[]}catch(e){return[]}
+ const r=await fetch(LEADERBOARD_API,{headers:{Accept:'application/json'}});
+ if(!r.ok)throw new Error('leaderboard read failed');
+ const data=await r.json();
+ if(!Array.isArray(data))throw new Error(data.error||'invalid leaderboard data');
+ return data;
 }
-async function writeGist(list){
- const r=await fetch('https://api.github.com/gists/'+GIST_ID,{
-  method:'PATCH',
-  headers:{Authorization:'Bearer '+GIST_TOKEN,Accept:'application/vnd.github+json','Content-Type':'application/json'},
-  body:JSON.stringify({files:{[GIST_FILE]:{content:JSON.stringify(list)}}})
- });
- if(!r.ok)throw new Error('gist write failed')}
 let submitting=false;
 async function submitScore(s,timeSec){
- if(!s||submitting)return;
- if(!window.fetch)return;
+ if(!s||submitting||!window.fetch)return;
  submitting=true;
  try{
   const pid=myPlayerId();
   const list=await readGist();
   const mine=list.find(e=>e.id===pid);
-  if(mine&&s<=mine.score){submitting=false;return}
+  if(mine&&s<=Number(mine.score))return;
   let name=localStorage.getItem('duckTetrisName');
   if(!name){
    name=(prompt('破紀錄了!想用什麼名字上世界排名?(取消就不上榜)')||'').trim().slice(0,16);
-   if(!name){submitting=false;return}
+   if(!name)return;
    try{localStorage.setItem('duckTetrisName',name)}catch(e){}
   }
-  const rest=list.filter(e=>e.id!==pid);
-  rest.push({id:pid,name:name,score:s,time:Math.round(timeSec||0),ts:Date.now()});
-  rest.sort((a,b)=>b.score-a.score);
-  await writeGist(rest.slice(0,50));
- }catch(e){}
- submitting=false}
+  const r=await fetch(LEADERBOARD_API,{
+   method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({id:pid,name,score:s,time:Math.round(timeSec||0)})
+  });
+  if(!r.ok)throw new Error('leaderboard submit failed');
+ }catch(e){
+  // Keep gameplay unaffected if online score submission is unavailable.
+ }
+ finally{submitting=false;}
+}
 async function openLeaderboard(){
  lb.style.display='flex';lbrows.innerHTML='';lbmsg.textContent='載入中…';
  if(!window.fetch){lbmsg.textContent='這個瀏覽器不支援,換一個試試';return}
